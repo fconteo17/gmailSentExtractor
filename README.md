@@ -1,18 +1,27 @@
 # Gmail Export Tool
 
-A Python tool for exporting sent emails from Gmail to Excel spreadsheets. This tool allows you to manage multiple Gmail accounts and export sent emails within specified date ranges to well-formatted Excel files.
+A Python tool with a modern dark-themed GUI for exporting sent emails from Gmail to Excel spreadsheets. This tool allows you to manage multiple Gmail accounts and export sent emails within specified date ranges to well-formatted Excel files.
 
 ## Features
 
-- Multiple Gmail account support
-- Date range filtering for exports
+- Modern dark-themed graphical user interface
+- Command-line interface (CLI) mode for automation and scripting
+- Multiple Gmail account support with:
+  - Checkbox-based account selection
+  - Bulk account operations (select all, remove multiple)
+  - Visual account management
+- Date range selection with calendar widgets
 - Well-formatted Excel exports with:
   - Sorted emails by date
   - Auto-adjusted column widths
   - Styled headers
   - Export metadata
-- Progress tracking for long operations
+- Real-time progress tracking with:
+  - Progress bar
+  - Email count updates
+  - Status messages
 - Comprehensive error handling and logging
+- Automatic last month date range selection
 
 ## Prerequisites
 
@@ -24,8 +33,8 @@ A Python tool for exporting sent emails from Gmail to Excel spreadsheets. This t
 
 1. Clone the repository:
 ```bash
-git clone <repository-url>
-cd gmail-export-tool
+git clone https://github.com/fconteo17/gmailSentExtractor.git
+cd gmailSentExtractor
 ```
 
 2. Create and activate a virtual environment:
@@ -48,22 +57,39 @@ pip install -r requirements.txt
 
 ## Usage
 
-1. Run the application:
+### Graphical Interface Mode
+
+1. Run the application in GUI mode (default):
 ```bash
 python run.py
 ```
 
-2. First-time setup:
-   - Choose option 1 to add a new email account
+2. Using the GUI:
+   - Click "Add Account" to add a new email account
    - Follow the authentication flow in your browser
-   - Grant the necessary permissions
+   - Select one or more accounts using checkboxes
+   - Choose date range (defaults to last month)
+   - Click "Export Emails" to start the export
 
-3. Export emails:
-   - Choose option 2 to use an existing account
-   - Select the account to use
-   - Enter the date range for the export
-   - Wait for the export to complete
-   - Find the exported file in the `data/exports` directory
+3. GUI Features:
+   - Use "Select All" to select all accounts
+   - Remove multiple accounts at once
+   - Monitor progress in real-time
+   - Find exported files in the `data/exports` directory
+
+### Command Line Mode
+
+1. Run the application in CLI mode:
+```bash
+python run.py --cli
+```
+
+2. CLI Features:
+   - Interactive command-line interface
+   - Text-based menu system
+   - Progress displayed in terminal
+   - Same functionality as GUI mode
+   - Suitable for automation and scripting
 
 ## Directory Structure
 
@@ -81,8 +107,8 @@ gmail-export-tool/
 │   ├── export.py
 │   ├── file_manager.py
 │   ├── gmail_service.py
-│   ├── main.py
-│   └── ui.py
+│   ├── gui.py
+│   └── main.py
 ├── README.md
 └── requirements.txt
 ```
@@ -102,7 +128,6 @@ The tool includes comprehensive error handling for:
 - Invalid inputs
 - File system errors
 - API rate limits
-
 
 ## License
 
