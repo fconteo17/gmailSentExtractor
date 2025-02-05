@@ -4,4 +4,6 @@ google-api-python-client>=2.0.0
 pandas>=2.0.0
 openpyxl>=3.1.0
 tqdm>=4.65.0
-PyQt6>=6.4.0 
+PyQt6>=6.4.0
+colorama>=0.4.6
+halo>=0.0.31 
