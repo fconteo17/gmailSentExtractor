@@ -55,25 +55,39 @@ class FileManager:
         filename = f'token_{email.replace("@", "_at_")}.pickle'
         return os.path.join(config.TOKENS_DIR, filename)
 
-    def get_export_path(self, email: str, start_date: datetime) -> str:
+    def get_export_path(self, email: str, start_date: datetime, end_date: datetime) -> str:
         """
         Get path for export file.
         
         Args:
             email: Email address associated with the export.
             start_date: Start date of the export period.
+            end_date: End date of the export period.
             
         Returns:
             str: Full path to the export file.
         """
         if not email:
             raise ValueError("Email address cannot be empty")
-            
-        filename = (
-            f'sent_emails_{email.replace("@", "_at_")}_'
-            f'{start_date.strftime("%Y%m%d")}{config.EXCEL_EXTENSION}'
+        
+        # Create a sanitized email folder name
+        email_folder_name = email.replace("@", "_at_").replace(".", "_")
+        email_export_dir = os.path.join(config.EXPORTS_DIR, email_folder_name)
+        
+        # Create the email-specific export directory if it doesn't exist
+        os.makedirs(email_export_dir, exist_ok=True)
+        
+        # Format the filename using the configured format
+        filename = config.EXCEL_FILENAME_FORMAT.format(
+            start_date=start_date.strftime("%Y%m%d"),
+            end_date=end_date.strftime("%Y%m%d")
         )
-        return os.path.join(config.EXPORTS_DIR, filename)
+        
+        # Add timestamp to ensure uniqueness
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{filename}_{timestamp}{config.EXCEL_EXTENSION}"
+        
+        return os.path.join(email_export_dir, filename)
 
     def ensure_credentials_exist(self) -> bool:
         """

@@ -11,6 +11,7 @@ from typing import List, Dict, Any, Tuple, Generator
 from tqdm import tqdm
 import base64
 from email.utils import parsedate_to_datetime
+import time
 
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -24,6 +25,10 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
+# Constants for API limits
+MAX_RESULTS_PER_PAGE = 10000
+MAX_RETRIES = 3
+RETRY_DELAY = 1  # seconds
 
 class GmailService:
     """Handles all Gmail API operations."""
@@ -146,47 +151,89 @@ class GmailService:
         query = f"in:sent after:{start_str} before:{end_str}"
 
         try:
-            # Get list of messages
-            results = service.users().messages().list(userId="me", q=query).execute()
-            messages = results.get("messages", [])
-
-            if not messages:
-                self.logger.info("No emails found in the specified date range")
-                return []
-
             emails_data = []
-            with tqdm(total=len(messages), desc="Fetching emails") as pbar:
-                for message in messages:
+            page_token = None
+            total_processed = 0
+
+            while True:
+                # Get list of messages with retries
+                for retry in range(MAX_RETRIES):
                     try:
-                        msg = (
+                        results = (
                             service.users()
                             .messages()
-                            .get(userId="me", id=message["id"])
+                            .list(
+                                userId="me",
+                                q=query,
+                                pageToken=page_token,
+                                maxResults=MAX_RESULTS_PER_PAGE
+                            )
                             .execute()
                         )
-
-                        headers = msg["payload"]["headers"]
-                        to_address = self._get_header(headers, "to", "No Recipient")
-                        username, domain = self._split_email(to_address)
-
-                        email_data = {
-                            "Date": self._get_header(headers, "date", "No Date"),
-                            "Username": username,
-                            "Domain": domain,
-                            "Subject": self._get_header(
-                                headers, "subject", "No Subject"
-                            ),
-                        }
-                        emails_data.append(email_data)
-                        pbar.update(1)
-                    except HttpError as e:
-                        self.logger.error(
-                            f"Error fetching message {message['id']}: {str(e)}"
-                        )
+                        break
                     except Exception as e:
-                        self.logger.error(
-                            f"Unexpected error processing message: {str(e)}"
-                        )
+                        if retry == MAX_RETRIES - 1:
+                            raise
+                        time.sleep(RETRY_DELAY)
+
+                messages = results.get("messages", [])
+                if not messages:
+                    break
+
+                with tqdm(total=len(messages), desc=f"Fetching emails (batch {total_processed + 1})") as pbar:
+                    for message in messages:
+                        try:
+                            msg = (
+                                service.users()
+                                .messages()
+                                .get(userId="me", id=message["id"])
+                                .execute()
+                            )
+
+                            headers = msg["payload"]["headers"]
+                            to_address = self._get_header(headers, "to", "No Recipient")
+                            username, domain = self._split_email(to_address)
+                            
+                            # Parse the date immediately
+                            date_str = self._get_header(headers, "date", None)
+                            if date_str:
+                                try:
+                                    parsed_date = parsedate_to_datetime(date_str)
+                                    # Convert to string in a consistent format
+                                    formatted_date = parsed_date.strftime("%Y-%m-%d %H:%M:%S")
+                                except Exception:
+                                    formatted_date = "No Date"
+                            else:
+                                formatted_date = "No Date"
+
+                            email_data = {
+                                "Date": formatted_date,
+                                "Username": username,
+                                "Domain": domain,
+                                "Subject": self._get_header(
+                                    headers, "subject", "No Subject"
+                                ),
+                            }
+                            emails_data.append(email_data)
+                            pbar.update(1)
+                        except HttpError as e:
+                            self.logger.error(
+                                f"Error fetching message {message['id']}: {str(e)}"
+                            )
+                            if "quota" in str(e).lower():
+                                time.sleep(RETRY_DELAY)
+                        except Exception as e:
+                            self.logger.error(
+                                f"Unexpected error processing message: {str(e)}"
+                            )
+
+                total_processed += len(messages)
+                page_token = results.get("nextPageToken")
+                if not page_token:
+                    break
+
+                # Small delay between batches to avoid rate limiting
+                time.sleep(0.1)
 
             return emails_data
 
@@ -231,22 +278,39 @@ class GmailService:
         query = f'in:sent after:{start_date.strftime("%Y/%m/%d")} before:{end_date.strftime("%Y/%m/%d")}'
 
         try:
-            # Get all message IDs first to get accurate count
-            result = service.users().messages().list(userId="me", q=query).execute()
+            total = 0
+            page_token = None
 
-            messages = result.get("messages", [])
-            total = len(messages)
+            while True:
+                # Get all message IDs with retries
+                for retry in range(MAX_RETRIES):
+                    try:
+                        result = (
+                            service.users()
+                            .messages()
+                            .list(
+                                userId="me",
+                                q=query,
+                                pageToken=page_token,
+                                maxResults=MAX_RESULTS_PER_PAGE
+                            )
+                            .execute()
+                        )
+                        break
+                    except Exception as e:
+                        if retry == MAX_RETRIES - 1:
+                            raise
+                        time.sleep(RETRY_DELAY)
 
-            # Get remaining messages if there are more pages
-            while "nextPageToken" in result:
-                result = (
-                    service.users()
-                    .messages()
-                    .list(userId="me", q=query, pageToken=result["nextPageToken"])
-                    .execute()
-                )
                 messages = result.get("messages", [])
                 total += len(messages)
+
+                page_token = result.get("nextPageToken")
+                if not page_token:
+                    break
+
+                # Small delay between batches to avoid rate limiting
+                time.sleep(0.1)
 
             return total
 
@@ -273,33 +337,47 @@ class GmailService:
         processed_count = 0
 
         while True:
-            # Get batch of message IDs
-            result = (
-                service.users()
-                .messages()
-                .list(
-                    userId="me",
-                    q=query,
-                    pageToken=page_token,
-                    maxResults=100,  # Process in batches of 100
-                )
-                .execute()
-            )
+            # Get batch of message IDs with retries
+            for retry in range(MAX_RETRIES):
+                try:
+                    result = (
+                        service.users()
+                        .messages()
+                        .list(
+                            userId="me",
+                            q=query,
+                            pageToken=page_token,
+                            maxResults=MAX_RESULTS_PER_PAGE
+                        )
+                        .execute()
+                    )
+                    break
+                except Exception as e:
+                    if retry == MAX_RETRIES - 1:
+                        raise
+                    time.sleep(RETRY_DELAY)
 
             messages = result.get("messages", [])
             if not messages:
                 break
 
             # Process each message in the batch
-            batch_data = []
             for message in messages:
                 try:
-                    msg = (
-                        service.users()
-                        .messages()
-                        .get(userId="me", id=message["id"], format="full")
-                        .execute()
-                    )
+                    # Get message details with retries
+                    for retry in range(MAX_RETRIES):
+                        try:
+                            msg = (
+                                service.users()
+                                .messages()
+                                .get(userId="me", id=message["id"], format="full")
+                                .execute()
+                            )
+                            break
+                        except Exception as e:
+                            if retry == MAX_RETRIES - 1:
+                                raise
+                            time.sleep(RETRY_DELAY)
 
                     # Extract email data
                     headers = msg["payload"]["headers"]
@@ -313,9 +391,12 @@ class GmailService:
                         continue
 
                     try:
-                        # Keep the original date string for pandas to parse
+                        # Parse the date immediately
+                        parsed_date = parsedate_to_datetime(date_str)
+                        formatted_date = parsed_date.strftime("%Y-%m-%d %H:%M:%S")
+
                         email_data = {
-                            "Date": date_str,  # Keep the original RFC 2822 date string
+                            "Date": formatted_date,
                             "Username": username,
                             "Domain": domain,
                             "Subject": self._get_header(
@@ -323,15 +404,12 @@ class GmailService:
                             ),
                         }
 
-                        batch_data.append(email_data)
                         processed_count += 1
-
-                        # Yield single-item batches for more accurate progress
                         yield [email_data]
 
                     except Exception as e:
                         self.logger.error(f"Error parsing date '{date_str}': {str(e)}")
-                        continue  # Skip emails with invalid dates
+                        continue
 
                 except Exception as e:
                     self.logger.error(
@@ -343,6 +421,9 @@ class GmailService:
             page_token = result.get("nextPageToken")
             if not page_token:
                 break
+
+            # Small delay between batches to avoid rate limiting
+            time.sleep(0.1)
 
     def _get_body_from_parts(self, parts: List[Dict[str, Any]]) -> str:
         """
