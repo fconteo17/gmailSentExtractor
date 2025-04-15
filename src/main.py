@@ -32,34 +32,57 @@ class GmailExportTool:
     def export_single_account(self, email: str, start_date: datetime, end_date: datetime) -> bool:
         """Export emails from a single account."""
         try:
-            # Setup service
-            self.ui.start_operation(f"Authenticating {email}")
-            service = self.gmail_service.setup_service(email)
-            self.ui.stop_operation()
-
-            # Get emails
-            self.ui.display_success(f"Starting email fetch for {email}...")
-            emails_data = []
-            
-            # Get total count first
-            total_messages = self.gmail_service.get_total_messages(
-                service, start_date, end_date
-            )
-            
-            if total_messages == 0:
-                self.ui.display_error(f"No emails found for {email} in the specified date range")
+            # Get account details
+            account = self.account_manager.get_account_details(email)
+            if not account:
+                self.ui.display_error(f"Account {email} not found")
                 return False
 
-            # Create progress bar
-            with self.ui.display_progress(
-                total=total_messages,
-                desc=f"Fetching emails from {email}"
-            ) as pbar:
-                for email_batch in self.gmail_service.get_sent_emails_with_progress(
+            auth_method = account.get("auth_method", "oauth")
+            
+            # Setup appropriate service based on auth method
+            self.ui.start_operation(f"Authenticating {email}")
+            if auth_method == "oauth":
+                service = self.gmail_service.setup_service(email)
+                self.ui.stop_operation()
+                
+                # Get emails using OAuth
+                self.ui.display_success(f"Starting email fetch for {email}...")
+                emails_data = []
+                
+                # Get total count first
+                total_messages = self.gmail_service.get_total_messages(
                     service, start_date, end_date
-                ):
-                    emails_data.extend(email_batch)
-                    pbar.update(1)
+                )
+                
+                if total_messages == 0:
+                    self.ui.display_error(f"No emails found for {email} in the specified date range")
+                    return False
+
+                # Create progress bar
+                with self.ui.display_progress(
+                    total=total_messages,
+                    desc=f"Fetching emails from {email}"
+                ) as pbar:
+                    for email_batch in self.gmail_service.get_sent_emails_with_progress(
+                        service, start_date, end_date
+                    ):
+                        emails_data.extend(email_batch)
+                        pbar.update(1)
+            else:  # IMAP
+                app_password = account.get("app_password")
+                if not app_password:
+                    self.ui.display_error(f"App password not found for {email}")
+                    return False
+                    
+                imap = self.gmail_service.setup_imap_service(email, app_password)
+                self.ui.stop_operation()
+                
+                # Get emails using IMAP
+                self.ui.display_success(f"Starting email fetch for {email}...")
+                emails_data = self.gmail_service.get_sent_emails_imap(
+                    imap, start_date, end_date
+                )
 
             if not emails_data:
                 self.ui.display_error(f"No emails found for {email} in the specified date range")
@@ -92,11 +115,25 @@ class GmailExportTool:
                 email = self.ui.get_email()
                 if email:
                     try:
-                        self.ui.start_operation(f"Setting up {email}")
-                        service = self.gmail_service.setup_service(email)
-                        if service:
-                            self.account_manager.add_account(email)
-                            self.ui.display_success(f"Successfully added {email}")
+                        # Get authentication method
+                        self.ui.display_auth_help()
+                        auth_method = self.ui.get_auth_method()
+                        
+                        app_password = None
+                        if auth_method == "imap":
+                            app_password = self.ui.get_app_password()
+                        
+                        # Add account with selected auth method
+                        if self.account_manager.add_account(email, auth_method, app_password):
+                            if auth_method == "oauth":
+                                # Test OAuth setup
+                                self.ui.start_operation(f"Setting up {email}")
+                                self.gmail_service.setup_service(email)
+                                self.ui.stop_operation()
+                            self.ui.display_success(f"Successfully added {email} with {auth_method.upper()} authentication")
+                        else:
+                            self.ui.display_error(f"Failed to add {email}")
+                            
                     except Exception as e:
                         self.ui.display_error(str(e))
                     finally:

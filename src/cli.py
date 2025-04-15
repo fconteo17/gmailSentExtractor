@@ -214,4 +214,61 @@ class EnhancedCLI:
         Returns:
             tqdm: Progress bar instance.
         """
-        return tqdm(total=total, desc=desc, ncols=100) 
+        return tqdm(total=total, desc=desc, ncols=100)
+
+    def get_auth_method(self) -> str:
+        """
+        Get authentication method choice from user.
+        
+        Returns:
+            str: Selected authentication method ('oauth' or 'imap').
+        """
+        print(f"\n{Fore.YELLOW}Select authentication method:{Style.RESET_ALL}")
+        print("1. OAuth (Browser-based login)")
+        print("2. IMAP (App Password)")
+        
+        while True:
+            try:
+                choice = int(input(f"\n{Fore.CYAN}Enter your choice (1-2):{Style.RESET_ALL} "))
+                if choice == 1:
+                    return "oauth"
+                elif choice == 2:
+                    return "imap"
+                print(f"{Fore.RED}Please enter 1 or 2{Style.RESET_ALL}")
+            except ValueError:
+                print(f"{Fore.RED}Please enter a valid number{Style.RESET_ALL}")
+
+    def get_app_password(self) -> str:
+        """
+        Get Google App Password from user.
+        
+        Returns:
+            str: App password.
+        """
+        print(f"\n{Fore.YELLOW}To use IMAP, you need to create an App Password:{Style.RESET_ALL}")
+        print("1. Go to your Google Account settings")
+        print("2. Navigate to Security > 2-Step Verification")
+        print("3. Scroll down and click on 'App passwords'")
+        print("4. Generate a new app password for 'Mail'")
+        
+        while True:
+            password = input(f"\n{Fore.CYAN}Enter your App Password (16 characters):{Style.RESET_ALL} ").strip()
+            if len(password) == 16:
+                return password
+            print(f"{Fore.RED}App Password must be 16 characters long{Style.RESET_ALL}")
+
+    def display_auth_help(self):
+        """Display help information about authentication methods."""
+        print(f"\n{Fore.YELLOW}Authentication Methods:{Style.RESET_ALL}")
+        print("\nOAuth (Recommended):")
+        print("- Secure browser-based login")
+        print("- No need to store passwords")
+        print("- Requires internet connection for initial setup")
+        
+        print("\nIMAP (Alternative):")
+        print("- Uses App Password")
+        print("- Requires enabling 2-Step Verification")
+        print("- More direct connection")
+        print("- Good for automated scripts")
+        
+        input(f"\n{Fore.CYAN}Press Enter to continue...{Style.RESET_ALL}") 

@@ -12,6 +12,9 @@ from tqdm import tqdm
 import base64
 from email.utils import parsedate_to_datetime
 import time
+import imaplib
+import email
+from email.header import decode_header
 
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -44,6 +47,8 @@ class GmailService:
         self.logger = logging.getLogger(__name__)
         self.file_manager = file_manager
         self.account_manager = account_manager
+        self.imap_server = "imap.gmail.com"
+        self.imap_port = 993
 
     @staticmethod
     def _split_email(email: str) -> Tuple[str, str]:
@@ -446,3 +451,112 @@ class GmailService:
             elif "parts" in part:
                 text.append(self._get_body_from_parts(part["parts"]))
         return "\n".join(text)
+
+    def setup_imap_service(self, email: str, app_password: str):
+        """
+        Set up IMAP connection for Gmail.
+        
+        Args:
+            email: Email address to connect with.
+            app_password: Google App Password for authentication.
+            
+        Returns:
+            imaplib.IMAP4_SSL: IMAP connection object.
+        """
+        try:
+            # Connect to IMAP server
+            imap = imaplib.IMAP4_SSL(self.imap_server, self.imap_port)
+            
+            # Login with email and app password
+            imap.login(email, app_password)
+            
+            return imap
+        except Exception as e:
+            self.logger.error(f"Error setting up IMAP connection: {str(e)}")
+            raise
+
+    def get_sent_emails_imap(self, imap: imaplib.IMAP4_SSL, start_date: datetime, end_date: datetime) -> List[Dict]:
+        """
+        Fetch sent emails using IMAP between specified dates.
+        
+        Args:
+            imap: IMAP connection object.
+            start_date: Start date for email fetch.
+            end_date: End date for email fetch.
+            
+        Returns:
+            List[Dict]: List of email data dictionaries.
+        """
+        try:
+            # Select the "[Gmail]/Sent Mail" folder
+            imap.select('"[Gmail]/Sent Mail"')
+            
+            # Format dates for IMAP query (SINCE and BEFORE)
+            since_date = start_date.strftime("%d-%b-%Y")
+            before_date = end_date.strftime("%d-%b-%Y")
+            search_criteria = f'(SINCE "{since_date}" BEFORE "{before_date}")'
+            
+            # Search for emails
+            _, message_numbers = imap.search(None, search_criteria)
+            
+            emails_data = []
+            total_messages = len(message_numbers[0].split())
+            
+            with tqdm(total=total_messages, desc="Fetching emails") as pbar:
+                for num in message_numbers[0].split():
+                    try:
+                        # Fetch email message
+                        _, msg_data = imap.fetch(num, "(RFC822)")
+                        email_body = msg_data[0][1]
+                        msg = email.message_from_bytes(email_body)
+                        
+                        # Get recipient
+                        to_address = msg["to"] or "No Recipient"
+                        username, domain = self._split_email(to_address)
+                        
+                        # Get date
+                        date_str = msg["date"]
+                        if date_str:
+                            try:
+                                parsed_date = parsedate_to_datetime(date_str)
+                                formatted_date = parsed_date.strftime("%Y-%m-%d %H:%M:%S")
+                            except Exception:
+                                formatted_date = "No Date"
+                        else:
+                            formatted_date = "No Date"
+                        
+                        # Get subject
+                        subject = msg["subject"]
+                        if subject:
+                            # Decode subject if needed
+                            decoded_subject = decode_header(subject)[0]
+                            if isinstance(decoded_subject[0], bytes):
+                                subject = decoded_subject[0].decode(decoded_subject[1] or "utf-8")
+                        else:
+                            subject = "No Subject"
+                        
+                        email_data = {
+                            "Date": formatted_date,
+                            "Username": username,
+                            "Domain": domain,
+                            "Subject": subject,
+                        }
+                        
+                        emails_data.append(email_data)
+                        pbar.update(1)
+                        
+                    except Exception as e:
+                        self.logger.error(f"Error processing message: {str(e)}")
+                        continue
+            
+            return emails_data
+            
+        except Exception as e:
+            self.logger.error(f"Error fetching emails via IMAP: {str(e)}")
+            raise
+        finally:
+            try:
+                imap.close()
+                imap.logout()
+            except:
+                pass
